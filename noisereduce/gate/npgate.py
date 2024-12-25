@@ -1,12 +1,14 @@
-import torch
-from torch.nn.functional import conv1d, conv2d
-from typing import Union, Optional
-from .utils import linspace, temperature_sigmoid, amp_to_db
+from typing import Optional, Union
+
+import numpy as np
+from scipy.signal import fftconvolve, stft, istft
+
+from .utils import temperature_sigmoid, amp_to_db, std_mean
 
 
-class TorchGate(torch.nn.Module):
+class NPGate:
     """
-    A PyTorch module that implements the noisereduce algorithm.
+    A class that implements the noisereduce algorithm using NumPy.
 
     This method performs noise reduction by computing the short-time Fourier transform (STFT) of the input signal
     and applying a signal mask based on either stationary or non-stationary assumptions.
@@ -26,21 +28,20 @@ class TorchGate(torch.nn.Module):
         time_mask_smooth_ms (float): Time smoothing width for the mask in ms (default: 50).
     """
 
-    @torch.no_grad()
     def __init__(
-        self,
-        sr: int,
-        nonstationary: bool = False,
-        n_std_thresh_stationary: float = 1.5,
-        n_thresh_nonstationary: float = 1.3,
-        temp_coeff_nonstationary: float = 0.1,
-        n_movemean_nonstationary: int = 20,
-        prop_decrease: float = 1.0,
-        n_fft: int = 1024,
-        win_length: Optional[int] = None,
-        hop_length: Optional[int] = None,
-        freq_mask_smooth_hz: float = 500,
-        time_mask_smooth_ms: float = 50,
+            self,
+            sr: int,
+            nonstationary: bool = False,
+            n_std_thresh_stationary: float = 1.5,
+            n_thresh_nonstationary: float = 1.3,
+            temp_coeff_nonstationary: float = 0.1,
+            n_movemean_nonstationary: int = 20,
+            prop_decrease: float = 1.0,
+            n_fft: int = 1024,
+            win_length: Optional[int] = None,
+            hop_length: Optional[int] = None,
+            freq_mask_smooth_hz: float = 500,
+            time_mask_smooth_ms: float = 50,
     ):
         super().__init__()
 
@@ -66,15 +67,14 @@ class TorchGate(torch.nn.Module):
         # Smooth Mask Params
         self.freq_mask_smooth_hz = freq_mask_smooth_hz
         self.time_mask_smooth_ms = time_mask_smooth_ms
-        self.register_buffer("smoothing_filter", self._generate_mask_smoothing_filter())
+        self.smoothing_filter = self._generate_mask_smoothing_filter()
 
-    @torch.no_grad()
-    def _generate_mask_smoothing_filter(self) -> Union[torch.Tensor, None]:
+    def _generate_mask_smoothing_filter(self) -> Union[np.ndarray, None]:
         """
         Generates a smoothing filter for the mask.
 
         Returns:
-            torch.Tensor: A 2D tensor representing the smoothing filter.
+            np.ndarray: A 2D tensor representing the smoothing filter.
         """
         if self.freq_mask_smooth_hz is None and self.time_mask_smooth_ms is None:
             return None
@@ -104,26 +104,26 @@ class TorchGate(torch.nn.Module):
         if n_grad_time == 1 and n_grad_freq == 1:
             return None
 
-        v_f = torch.cat(
-            [
-                linspace(0, 1, n_grad_freq + 1, endpoint=False),
-                linspace(1, 0, n_grad_freq + 2),
-            ]
-        )[1:-1]
-        v_t = torch.cat(
-            [
-                linspace(0, 1, n_grad_time + 1, endpoint=False),
-                linspace(1, 0, n_grad_time + 2),
-            ]
-        )[1:-1]
-        smoothing_filter = torch.outer(v_f, v_t).unsqueeze(0).unsqueeze(0)
+        smoothing_filter = np.outer(
+            np.concatenate(
+                [
+                    np.linspace(0, 1, n_grad_freq + 1, endpoint=False),
+                    np.linspace(1, 0, n_grad_freq + 2),
+                ]
+            )[1:-1],
+            np.concatenate(
+                [
+                    np.linspace(0, 1, n_grad_time + 1, endpoint=False),
+                    np.linspace(1, 0, n_grad_time + 2),
+                ]
+            )[1:-1],
+        )
+        smoothing_filter = smoothing_filter / np.sum(smoothing_filter)
+        return smoothing_filter
 
-        return smoothing_filter / smoothing_filter.sum()
-
-    @torch.no_grad()
     def _stationary_mask(
-        self, X_db: torch.Tensor, xn: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+            self, X_db: np.ndarray, xn: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         """
         Computes a stationary binary mask.
 
@@ -131,42 +131,37 @@ class TorchGate(torch.nn.Module):
         to a threshold derived from the mean and standard deviation along the frequency axis.
 
         Arguments:
-            X_db (torch.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (torch.Tensor, optional): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            X_db (np.ndarray): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
+            xn (np.ndarray, optional): 1D array containing the time-domain audio signal corresponding to `X_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
-            torch.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
+            np.ndarray: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
                         spectrogram value exceeds the computed noise threshold, and 0 otherwise.
         """
         if xn is not None:
-            XN = torch.stft(
+            XN = stft(
                 xn,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length,
-                win_length=self.win_length,
-                return_complex=True,
-                pad_mode="constant",
-                center=True,
-                window=torch.hann_window(self.win_length).to(xn.device),
-            )
-
-            XN_db = amp_to_db(XN).to(dtype=X_db.dtype)
+                nfft=self.n_fft,
+                noverlap=self.win_length - self.hop_length,
+                nperseg=self.win_length,
+                padded=False
+            )[2]
+            XN_db = amp_to_db(XN)
         else:
             XN_db = X_db
 
         # calculate mean and standard deviation along the frequency axis
-        std_freq_noise, mean_freq_noise = torch.std_mean(XN_db, dim=-1)
+        std_freq_noise, mean_freq_noise = std_mean(XN_db, axis=-1)
 
         # compute noise threshold
         noise_thresh = mean_freq_noise + std_freq_noise * self.n_std_thresh_stationary
 
         # create binary mask by thresholding the spectrogram
-        sig_mask = torch.gt(X_db, noise_thresh.unsqueeze(2))
+        sig_mask = X_db > np.expand_dims(noise_thresh, axis=2)
         return sig_mask
 
-    @torch.no_grad()
-    def _nonstationary_mask(self, X_abs: torch.Tensor) -> torch.Tensor:
+    def _nonstationary_mask(self, X_abs: np.ndarray) -> np.ndarray:
         """
         Computes a non-stationary binary mask.
 
@@ -174,24 +169,16 @@ class TorchGate(torch.nn.Module):
         magnitude spectrogram and computing the slowness ratio between the original and smoothed spectrogram.
 
         Arguments:
-            X_abs (torch.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
+            X_abs (np.ndarray): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
 
         Returns:
-            torch.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
+            np.ndarray: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
                         region is identified as non-stationary (rapid changes), and 0 otherwise.
         """
-        X_smoothed = (
-            conv1d(
-                X_abs.reshape(-1, 1, X_abs.shape[-1]),
-                torch.ones(
-                    self.n_movemean_nonstationary,
-                    dtype=X_abs.dtype,
-                    device=X_abs.device,
-                ).view(1, 1, -1),
-                padding="same",
-            ).view(X_abs.shape)
-            / self.n_movemean_nonstationary
-        )
+        kernel = np.ones(self.n_movemean_nonstationary, dtype=X_abs.dtype) / self.n_movemean_nonstationary
+        X_smoothed = np.array([
+            fftconvolve(X_abs, kernel, mode='same')
+        ])
 
         # Compute slowness ratio and apply temperature sigmoid
         slowness_ratio = (X_abs - X_smoothed) / X_smoothed
@@ -201,20 +188,19 @@ class TorchGate(torch.nn.Module):
 
         return sig_mask
 
-    @torch.no_grad()
-    def forward(
-        self, x: torch.Tensor, xn: Optional[torch.Tensor] = None
-    ) -> torch.Tensor:
+    def __call__(
+            self, x: np.ndarray, xn: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         """
         Apply noise reduction to the input signal.
 
         Arguments:
-            x (torch.Tensor): The input audio signal, with shape (channels, signal_length).
-            xn (Optional[torch.Tensor]): The noise signal used for stationary noise reduction. If `None`, the input
+            x (np.ndarray): The input audio signal, with shape (channels, signal_length).
+            xn (Optional[np.ndarray]): The noise signal used for stationary noise reduction. If `None`, the input
                                          signal is used as the noise signal. Default: `None`.
 
         Returns:
-            torch.Tensor: The denoised signal.
+            np.ndarray: The denoised signal.
         """
         assert x.ndim == 2
         if x.shape[-1] < self.win_length * 2:
@@ -225,20 +211,17 @@ class TorchGate(torch.nn.Module):
             raise Exception(f"xn must be bigger than {self.win_length * 2}")
 
         # Compute short-time Fourier transform (STFT)
-        X = torch.stft(
+        X = stft(
             x,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            win_length=self.win_length,
-            return_complex=True,
-            pad_mode="constant",
-            center=True,
-            window=torch.hann_window(self.win_length).to(x.device),
-        )
+            nfft=self.n_fft,
+            noverlap=self.win_length - self.hop_length,
+            nperseg=self.win_length,
+            padded=False
+        )[2]
 
         # Compute signal mask based on stationary or nonstationary assumptions
         if self.nonstationary:
-            sig_mask = self._nonstationary_mask(X.abs())
+            sig_mask = self._nonstationary_mask(np.abs(X))
         else:
             sig_mask = self._stationary_mask(amp_to_db(X), xn)
 
@@ -247,23 +230,17 @@ class TorchGate(torch.nn.Module):
 
         # Smooth signal mask with 2D convolution
         if self.smoothing_filter is not None:
-            sig_mask = conv2d(
-                sig_mask.unsqueeze(1),
-                self.smoothing_filter.to(sig_mask.dtype),
-                padding="same",
-            )
+            sig_mask = fftconvolve(sig_mask, self.smoothing_filter, mode="same")
 
         # Apply signal mask to STFT magnitude and phase components
-        Y = X * sig_mask.squeeze(1)
+        Y = X * sig_mask
 
         # Inverse STFT to obtain time-domain signal
-        y = torch.istft(
+        y = istft(
             Y,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            win_length=self.win_length,
-            center=True,
-            window=torch.hann_window(self.win_length).to(Y.device),
-        )
+            nfft=self.n_fft,
+            noverlap=self.win_length - self.hop_length,
+            nperseg=self.win_length
+        )[1]
 
-        return y.to(dtype=x.dtype)
+        return y

@@ -1,17 +1,7 @@
-from noisereduce.spectralgate.stationary import SpectralGateStationary
-from noisereduce.spectralgate.nonstationary import SpectralGateNonStationary
-
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-if TORCH_AVAILABLE:
-    from noisereduce.spectralgate.streamed_torch_gate import StreamedTorchGate
-
+from noisereduce.stream import StreamGate
 
 def reduce_noise(
-        y,
+        x,
         sr,
         stationary=False,
         y_noise=None,
@@ -31,7 +21,6 @@ def reduce_noise(
         clip_noise_stationary=True,
         use_tqdm=False,
         n_jobs=1,
-        use_torch=False,
         device="cuda",
 ):
     """
@@ -119,8 +108,8 @@ def reduce_noise(
 
     # if using pytorch,
     if use_torch:
-        sg = StreamedTorchGate(
-            y=y,
+        sg = StreamGate(
+            x=x,
             sr=sr,
             stationary=stationary,
             y_noise=y_noise,
@@ -141,45 +130,4 @@ def reduce_noise(
             n_jobs=n_jobs,
             device=device,
         )
-    else:
-        if stationary:
-            sg = SpectralGateStationary(
-                y=y,
-                sr=sr,
-                y_noise=y_noise,
-                prop_decrease=prop_decrease,
-                n_std_thresh_stationary=n_std_thresh_stationary,
-                chunk_size=chunk_size,
-                clip_noise_stationary=clip_noise_stationary,
-                padding=padding,
-                n_fft=n_fft,
-                win_length=win_length,
-                hop_length=hop_length,
-                time_constant_s=time_constant_s,
-                freq_mask_smooth_hz=freq_mask_smooth_hz,
-                time_mask_smooth_ms=time_mask_smooth_ms,
-                tmp_folder=tmp_folder,
-                use_tqdm=use_tqdm,
-                n_jobs=n_jobs,
-            )
-
-        else:
-            sg = SpectralGateNonStationary(
-                y=y,
-                sr=sr,
-                chunk_size=chunk_size,
-                padding=padding,
-                prop_decrease=prop_decrease,
-                n_fft=n_fft,
-                win_length=win_length,
-                hop_length=hop_length,
-                time_constant_s=time_constant_s,
-                freq_mask_smooth_hz=freq_mask_smooth_hz,
-                time_mask_smooth_ms=time_mask_smooth_ms,
-                thresh_n_mult_nonstationary=thresh_n_mult_nonstationary,
-                sigmoid_slope_nonstationary=sigmoid_slope_nonstationary,
-                tmp_folder=tmp_folder,
-                use_tqdm=use_tqdm,
-                n_jobs=n_jobs,
-            )
     return sg.get_traces()

@@ -6,6 +6,27 @@ from .utils import amp_to_db, linspace, temperature_sigmoid
 
 
 class TFGate(tf.keras.Model):
+    """
+    A TensorFlow module that implements the noisereduce algorithm.
+
+    This method performs noise reduction by computing the short-time Fourier transform (STFT) of the input signal
+    and applying a signal mask based on either stationary or non-stationary assumptions.
+
+    Arguments:
+        sr (int): Sample rate of the input signal.
+        nonstationary (bool): Whether to use non-stationary or stationary masking (default: False).
+        n_std_thresh_stationary (float): Threshold for stationary noise reduction (default: 1.5).
+        n_thresh_nonstationary (float): Threshold for non-stationary noise reduction (default: 1.3).
+        temp_coeff_nonstationary (float): Temperature coefficient for non-stationary masking (default: 0.1).
+        n_movemean_nonstationary (int): Window size for moving average in non-stationary masking (default: 20).
+        prop_decrease (float): Proportion to decrease signal where the mask is zero (default: 1.0).
+        n_fft (int): FFT size for short-time Fourier transform (STFT) (default: 1024).
+        win_length (Optional[int]): Window length for STFT (default: None).
+        hop_length (Optional[int]): Hop length for STFT (default: None).
+        freq_mask_smooth_hz (float): Frequency smoothing width for the mask in Hz (default: 500).
+        time_mask_smooth_ms (float): Time smoothing width for the mask in ms (default: 50).
+    """
+
     def __init__(
             self,
             sr: int,
@@ -16,8 +37,8 @@ class TFGate(tf.keras.Model):
             n_movemean_nonstationary: int = 20,
             prop_decrease: float = 1.0,
             n_fft: int = 1024,
-            win_length: bool = None,
-            hop_length: int = None,
+            win_length: Optional[int] = None,
+            hop_length: Optional[int] = None,
             freq_mask_smooth_hz: float = 500,
             time_mask_smooth_ms: float = 50,
     ):
@@ -31,8 +52,8 @@ class TFGate(tf.keras.Model):
 
         # STFT Params
         self.n_fft = n_fft
-        self.win_length = self.n_fft if win_length is None else win_length
-        self.hop_length = self.win_length // 4 if hop_length is None else hop_length
+        self.win_length = win_length if win_length is not None else self.n_fft
+        self.hop_length = hop_length if hop_length is not None else self.win_length // 4
 
         # Stationary Params
         self.n_std_thresh_stationary = n_std_thresh_stationary
@@ -49,7 +70,7 @@ class TFGate(tf.keras.Model):
 
     def _generate_mask_smoothing_filter(self) -> Optional[tf.Tensor]:
         """
-        A TensorFlow function that generates a smoothing filter for the mask.
+        Generates a smoothing filter for the mask.
 
         Returns:
             tf.Tensor: A 2D tensor representing the smoothing filter.
@@ -99,7 +120,22 @@ class TFGate(tf.keras.Model):
         smoothing_filter = tf.transpose(smoothing_filter, perm=[2, 3, 0, 1])
         return smoothing_filter
 
-    def _stationary_mask(self, X_db, xn=None):
+    def _stationary_mask(self, X_db: tf.Tensor, xn: Optional[tf.Tensor] = None):
+        """
+        Computes a stationary binary mask.
+
+        This method computes a stationary binary mask by comparing the given spectrogram (or an optional audio signal)
+        to a threshold derived from the mean and standard deviation along the frequency axis.
+
+        Arguments:
+            X_db (tf.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
+            xn (tf.Tensor, optional): 1D array containing the time-domain audio signal corresponding to `X_db`.
+                                       If provided, this is used to compute the spectrogram for noise estimation.
+
+        Returns:
+            tf.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
+                        spectrogram value exceeds the computed noise threshold, and 0 otherwise.
+        """
         if xn is not None:
             XN = tf.signal.stft(
                 xn,
@@ -122,7 +158,20 @@ class TFGate(tf.keras.Model):
 
         return sig_mask
 
-    def _nonstationary_mask(self, X_abs):
+    def _nonstationary_mask(self, X_abs: tf.Tensor):
+        """
+        Computes a non-stationary binary mask.
+
+        This method computes a non-stationary binary mask by applying a moving average smoothing filter to the
+        magnitude spectrogram and computing the slowness ratio between the original and smoothed spectrogram.
+
+        Arguments:
+            X_abs (tf.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
+
+        Returns:
+            tf.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
+                        region is identified as non-stationary (rapid changes), and 0 otherwise.
+        """
         X_smoothed = (
                 tf.nn.conv1d(
                     X_abs,
@@ -143,15 +192,18 @@ class TFGate(tf.keras.Model):
 
         return sig_mask
 
-    def call(self, x, xn=None, **kwargs):
-        assert x.shape.ndims == 2
-        if x.shape[-1] < self.win_length * 2:
-            raise Exception(f"x must be bigger than {self.win_length * 2}")
+    def _process(self, x: tf.Tensor, xn: Optional[tf.Tensor]):
+        """
+        Core logic for processing.
 
-        assert xn is None or xn.shape.ndims == 1 or xn.shape.ndims == 2
-        if xn is not None and xn.shape[-1] < self.win_length * 2:
-            raise Exception(f"xn must be bigger than {self.win_length * 2}")
+        Arguments:
+            x (tf.Tensor): The input audio signal, with shape (channels, signal_length).
+            xn (Optional[tf.Tensor]): The noise signal used for stationary noise reduction. If `None`, the input
+                                         signal is used as the noise signal. Default: `None`.
 
+        Returns:
+            tf.Tensor: The denoised signal.
+        """
         X = tf.signal.stft(
             x,
             frame_length=self.win_length,
@@ -189,3 +241,25 @@ class TFGate(tf.keras.Model):
         )
 
         return y
+
+    def __call__(self, x: tf.Tensor, xn: Optional[tf.Tensor] = None):
+        """
+        Apply noise reduction to the input signal.
+
+        Arguments:
+            x (tf.Tensor): The input audio signal, with shape (channels, signal_length).
+            xn (Optional[tf.Tensor]): The noise signal used for stationary noise reduction. If `None`, the input
+                                         signal is used as the noise signal. Default: `None`.
+
+        Returns:
+            tf.Tensor: The denoised signal.
+        """
+        assert x.shape.ndims == 2
+        if x.shape[-1] < self.win_length * 2:
+            raise Exception(f"x must be bigger than {self.win_length * 2}")
+
+        assert xn is None or xn.shape.ndims == 1 or xn.shape.ndims == 2
+        if xn is not None and xn.shape[-1] < self.win_length * 2:
+            raise Exception(f"xn must be bigger than {self.win_length * 2}")
+
+        return tf.stop_gradient(self._process(x, xn))
