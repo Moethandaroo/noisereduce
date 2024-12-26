@@ -7,17 +7,22 @@ def amp_to_db(x: torch.Tensor, eps: float = torch.finfo(torch.float64).eps, top_
     """
     Convert the input tensor from amplitude to decibel scale.
 
-    Arguments:
-        x {[torch.Tensor]} -- [Input tensor.]
+    This function transforms an amplitude input `x` (e.g., audio signal or magnitude spectrum)
+    into a decibel (dB) scale.
+    It applies the formula:
 
-    Keyword Arguments:
-        eps {[float]} -- [Small value to avoid numerical instability.]
-                          (default: {torch.finfo(torch.float64).eps})
-        top_db {[float]} -- [threshold the output at ``top_db`` below the peak]
-            `             (default: {40})
+        dB = 20 * log10(abs(x) + eps)
+
+    where `eps` is a small constant added to avoid log of zero. The function also limits the maximum
+    value of the decibel output to `top_db` decibels below the maximum value across the last axis of `x`.
+
+    Arguments:
+        x (torch.Tensor): Input tensor.
+        eps (float): Small value to avoid numerical instability. (default: torch.finfo(torch.float64).eps)
+        top_db (float): threshold the output at ``top_db`` below the peak (default: 40)
 
     Returns:
-        [torch.Tensor] -- [Output tensor in decibel scale.]
+        torch.Tensor: Output tensor in decibel scale.
     """
     x_db = 20 * torch.log10(x.abs() + eps)
     return torch.max(x_db, (x_db.max(-1).values - top_db).unsqueeze(-1))
@@ -50,8 +55,6 @@ def linspace(start: Number, stop: Number, num: int = 50, endpoint: bool = True, 
                         In that case, the sequence consists of all but the last of `num + 1`
                         evenly spaced samples, so that `stop` is excluded. Note that the step
                         size changes when `endpoint` is False.
-
-    Keyword Arguments:
         num (int): Number of samples to generate. Default is 50. Must be non-negative.
         endpoint (bool): If True, `stop` is the last sample. Otherwise, it is not included.
                           Default is True.

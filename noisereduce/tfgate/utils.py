@@ -6,12 +6,19 @@ def amp_to_db(x: tf.Tensor, eps: float = 1e-16, top_db: float = 40) -> tf.Tensor
     """
     Convert the input tensor from amplitude to decibel scale.
 
+    This function transforms an amplitude input `x` (e.g., audio signal or magnitude spectrum)
+    into a decibel (dB) scale.
+    It applies the formula:
+
+        dB = 20 * log10(abs(x) + eps)
+
+    where `eps` is a small constant added to avoid log of zero. The function also limits the maximum
+    value of the decibel output to `top_db` decibels below the maximum value across the last axis of `x`.
+
     Arguments:
         x (tf.Tensor): Input tensor.
-
-    Keyword Arguments:
-        eps tf.Tensor: Small value to avoid numerical instability. (default: tf.constant(np.finfo(np.float64).eps))
-        top_db float: Threshold the output at "top_db" below the peak (default: 40)
+        eps (tf.Tensor): Small value to avoid numerical instability. (default: tf.constant(np.finfo(np.float64).eps))
+        top_db (float): Threshold the output at "top_db" below the peak (default: 40)
 
     Returns:
         tf.Tensor: Output tensor in decibel scale.
@@ -46,8 +53,6 @@ def linspace(start: Number, stop: Number, num: int = 50, endpoint: bool = True, 
                         In that case, the sequence consists of all but the last of `num + 1`
                         evenly spaced samples, so that `stop` is excluded. Note that the step
                         size changes when `endpoint` is False.
-
-    Keyword Arguments:
         num (int): Number of samples to generate. Default is 50. Must be non-negative.
         endpoint (bool): If True, `stop` is the last sample. Otherwise, it is not included.
                           Default is True.

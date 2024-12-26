@@ -120,7 +120,7 @@ class NPGate:
         return smoothing_filter
 
     def _stationary_mask(
-            self, X_db: np.ndarray, xn: np.ndarray | None = None
+            self, xf_db: np.ndarray, xn: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Computes a stationary binary mask.
@@ -129,8 +129,8 @@ class NPGate:
         to a threshold derived from the mean and standard deviation along the frequency axis.
 
         Arguments:
-            X_db (np.ndarray): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (np.ndarray | None): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            xf_db (np.ndarray): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
+            xn (np.ndarray | None): 1D array containing the time-domain audio signal corresponding to `xf_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
@@ -147,7 +147,7 @@ class NPGate:
             )[2]
             XN_db = amp_to_db(XN)
         else:
-            XN_db = X_db
+            XN_db = xf_db
 
         # calculate mean and standard deviation along the frequency axis
         std_freq_noise, mean_freq_noise = std_mean(XN_db, axis=-1)
@@ -156,10 +156,10 @@ class NPGate:
         noise_thresh = mean_freq_noise + std_freq_noise * self.n_std_thresh_stationary
 
         # create binary mask by thresholding the spectrogram
-        sig_mask = X_db > np.expand_dims(noise_thresh, axis=2)
+        sig_mask = xf_db > np.expand_dims(noise_thresh, axis=2)
         return sig_mask
 
-    def _nonstationary_mask(self, X_abs: np.ndarray) -> np.ndarray:
+    def _nonstationary_mask(self, xf_abs: np.ndarray) -> np.ndarray:
         """
         Computes a non-stationary binary mask.
 
@@ -167,19 +167,19 @@ class NPGate:
         magnitude spectrogram and computing the slowness ratio between the original and smoothed spectrogram.
 
         Arguments:
-            X_abs (np.ndarray): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
+            xf_abs (np.ndarray): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
 
         Returns:
             np.ndarray: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
                         region is identified as non-stationary (rapid changes), and 0 otherwise.
         """
-        kernel = np.ones(self.n_movemean_nonstationary, dtype=X_abs.dtype) / self.n_movemean_nonstationary
+        kernel = np.ones(self.n_movemean_nonstationary, dtype=xf_abs.dtype) / self.n_movemean_nonstationary
         X_smoothed = np.array([
-            fftconvolve(X_abs, kernel, mode='same')
+            fftconvolve(xf_abs, kernel, mode='same')
         ])
 
         # Compute slowness ratio and apply temperature sigmoid
-        slowness_ratio = (X_abs - X_smoothed) / X_smoothed
+        slowness_ratio = (xf_abs - X_smoothed) / X_smoothed
         sig_mask = temperature_sigmoid(
             slowness_ratio, self.n_thresh_nonstationary, self.temp_coeff_nonstationary
         )

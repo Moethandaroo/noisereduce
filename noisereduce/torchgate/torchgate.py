@@ -122,7 +122,7 @@ class TorchGate(torch.nn.Module):
 
     @torch.no_grad()
     def _stationary_mask(
-        self, X_db: torch.Tensor, xn: torch.Tensor | None = None
+        self, xf_db: torch.Tensor, xn: torch.Tensor | None = None
     ) -> torch.Tensor:
         """
         Computes a stationary binary mask.
@@ -131,8 +131,8 @@ class TorchGate(torch.nn.Module):
         to a threshold derived from the mean and standard deviation along the frequency axis.
 
         Arguments:
-            X_db (torch.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (torch.Tensor | None): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            xf_db (torch.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
+            xn (torch.Tensor | None): 1D array containing the time-domain audio signal corresponding to `xf_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
@@ -151,9 +151,9 @@ class TorchGate(torch.nn.Module):
                 window=torch.hann_window(self.win_length).to(xn.device),
             )
 
-            XN_db = amp_to_db(XN).to(dtype=X_db.dtype)
+            XN_db = amp_to_db(XN).to(dtype=xf_db.dtype)
         else:
-            XN_db = X_db
+            XN_db = xf_db
 
         # calculate mean and standard deviation along the frequency axis
         std_freq_noise, mean_freq_noise = torch.std_mean(XN_db, dim=-1)
@@ -162,11 +162,11 @@ class TorchGate(torch.nn.Module):
         noise_thresh = mean_freq_noise + std_freq_noise * self.n_std_thresh_stationary
 
         # create binary mask by thresholding the spectrogram
-        sig_mask = torch.gt(X_db, noise_thresh.unsqueeze(2))
+        sig_mask = torch.gt(xf_db, noise_thresh.unsqueeze(2))
         return sig_mask
 
     @torch.no_grad()
-    def _nonstationary_mask(self, X_abs: torch.Tensor) -> torch.Tensor:
+    def _nonstationary_mask(self, xf_abs: torch.Tensor) -> torch.Tensor:
         """
         Computes a non-stationary binary mask.
 
@@ -174,7 +174,7 @@ class TorchGate(torch.nn.Module):
         magnitude spectrogram and computing the slowness ratio between the original and smoothed spectrogram.
 
         Arguments:
-            X_abs (torch.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
+            xf_abs (torch.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
 
         Returns:
             torch.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
@@ -182,19 +182,19 @@ class TorchGate(torch.nn.Module):
         """
         X_smoothed = (
             conv1d(
-                X_abs.reshape(-1, 1, X_abs.shape[-1]),
+                xf_abs.reshape(-1, 1, xf_abs.shape[-1]),
                 torch.ones(
                     self.n_movemean_nonstationary,
-                    dtype=X_abs.dtype,
-                    device=X_abs.device,
+                    dtype=xf_abs.dtype,
+                    device=xf_abs.device,
                 ).view(1, 1, -1),
                 padding="same",
-            ).view(X_abs.shape)
+            ).view(xf_abs.shape)
             / self.n_movemean_nonstationary
         )
 
         # Compute slowness ratio and apply temperature sigmoid
-        slowness_ratio = (X_abs - X_smoothed) / X_smoothed
+        slowness_ratio = (xf_abs - X_smoothed) / X_smoothed
         sig_mask = temperature_sigmoid(
             slowness_ratio, self.n_thresh_nonstationary, self.temp_coeff_nonstationary
         )

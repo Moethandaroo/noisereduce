@@ -118,7 +118,7 @@ class TFGate(tf.keras.Model):
         smoothing_filter = tf.transpose(smoothing_filter, perm=[2, 3, 0, 1])
         return smoothing_filter
 
-    def _stationary_mask(self, X_db: tf.Tensor, xn: tf.Tensor | None = None) -> tf.Tensor:
+    def _stationary_mask(self, xf_db: tf.Tensor, xn: tf.Tensor | None = None) -> tf.Tensor:
         """
         Computes a stationary binary mask.
 
@@ -126,8 +126,8 @@ class TFGate(tf.keras.Model):
         to a threshold derived from the mean and standard deviation along the frequency axis.
 
         Arguments:
-            X_db (tf.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (tf.Tensor | None): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            xf_db (tf.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
+            xn (tf.Tensor | None): 1D array containing the time-domain audio signal corresponding to `xf_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
@@ -145,18 +145,18 @@ class TFGate(tf.keras.Model):
             )
             XN_db = amp_to_db(XN)
         else:
-            XN_db = X_db
+            XN_db = xf_db
 
         std_freq_noise, mean_freq_noise = tf.math.reduce_std(
             XN_db, axis=1, keepdims=True
         ), tf.math.reduce_mean(XN_db, axis=1, keepdims=True)
 
         noise_thresh = mean_freq_noise + std_freq_noise * self.n_std_thresh_stationary
-        sig_mask = tf.math.greater(X_db, noise_thresh)
+        sig_mask = tf.math.greater(xf_db, noise_thresh)
 
         return sig_mask
 
-    def _nonstationary_mask(self, X_abs: tf.Tensor) -> tf.Tensor:
+    def _nonstationary_mask(self, xf_abs: tf.Tensor) -> tf.Tensor:
         """
         Computes a non-stationary binary mask.
 
@@ -164,7 +164,7 @@ class TFGate(tf.keras.Model):
         magnitude spectrogram and computing the slowness ratio between the original and smoothed spectrogram.
 
         Arguments:
-            X_abs (tf.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
+            xf_abs (tf.Tensor): 2D array of shape (frames, freq_bins) containing the magnitude spectrogram of the signal.
 
         Returns:
             tf.Tensor: A binary mask of shape (frames, freq_bins), where entries are set to 1 if the corresponding
@@ -172,10 +172,10 @@ class TFGate(tf.keras.Model):
         """
         X_smoothed = (
                 tf.nn.conv1d(
-                    X_abs,
+                    xf_abs,
                     filters=tf.ones(
-                        shape=(self.n_movemean_nonstationary, 1, X_abs.shape[-1]),
-                        dtype=X_abs.dtype,
+                        shape=(self.n_movemean_nonstationary, 1, xf_abs.shape[-1]),
+                        dtype=xf_abs.dtype,
                     ),
                     stride=1,
                     padding="SAME",
@@ -183,7 +183,7 @@ class TFGate(tf.keras.Model):
                 / self.n_movemean_nonstationary
         )
 
-        slowness_ratio = (X_abs - X_smoothed) / X_smoothed
+        slowness_ratio = (xf_abs - X_smoothed) / X_smoothed
         sig_mask = temperature_sigmoid(
             slowness_ratio, self.n_thresh_nonstationary, self.temp_coeff_nonstationary
         )

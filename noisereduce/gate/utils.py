@@ -53,7 +53,7 @@ def amp_to_db(x: np.ndarray, eps: float = np.finfo(np.float64).eps, top_db: floa
     where `eps` is a small constant added to avoid log of zero. The function also limits the maximum
     value of the decibel output to `top_db` decibels below the maximum value across the last axis of `x`.
 
-    Args:
+    Arguments:
         x (np.ndarray): The input array, typically representing amplitude values (e.g., audio signal or spectrum).
         eps (float, optional): A small constant added to the amplitude to prevent log of zero. Default is the smallest positive float64.
         top_db (float, optional): The threshold value in decibels. Any values above this threshold will be clipped. Default is 80.0 dB.
