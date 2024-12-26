@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 import numpy as np
 from scipy.signal import fftconvolve, stft, istft
 
@@ -22,8 +20,8 @@ class NPGate:
         n_movemean_nonstationary (int): Window size for moving average in non-stationary masking (default: 20).
         prop_decrease (float): Proportion to decrease signal where the mask is zero (default: 1.0).
         n_fft (int): FFT size for short-time Fourier transform (STFT) (default: 1024).
-        win_length (Optional[int]): Window length for STFT (default: None).
-        hop_length (Optional[int]): Hop length for STFT (default: None).
+        win_length (int | None): Window length for STFT (default: None).
+        hop_length (int | None): Hop length for STFT (default: None).
         freq_mask_smooth_hz (float): Frequency smoothing width for the mask in Hz (default: 500).
         time_mask_smooth_ms (float): Time smoothing width for the mask in ms (default: 50).
     """
@@ -38,8 +36,8 @@ class NPGate:
             n_movemean_nonstationary: int = 20,
             prop_decrease: float = 1.0,
             n_fft: int = 1024,
-            win_length: Optional[int] = None,
-            hop_length: Optional[int] = None,
+            win_length: int | None = None,
+            hop_length: int | None = None,
             freq_mask_smooth_hz: float = 500,
             time_mask_smooth_ms: float = 50,
     ):
@@ -69,7 +67,7 @@ class NPGate:
         self.time_mask_smooth_ms = time_mask_smooth_ms
         self.smoothing_filter = self._generate_mask_smoothing_filter()
 
-    def _generate_mask_smoothing_filter(self) -> Union[np.ndarray, None]:
+    def _generate_mask_smoothing_filter(self) -> np.ndarray | None:
         """
         Generates a smoothing filter for the mask.
 
@@ -122,7 +120,7 @@ class NPGate:
         return smoothing_filter
 
     def _stationary_mask(
-            self, X_db: np.ndarray, xn: Optional[np.ndarray] = None
+            self, X_db: np.ndarray, xn: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Computes a stationary binary mask.
@@ -132,7 +130,7 @@ class NPGate:
 
         Arguments:
             X_db (np.ndarray): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (np.ndarray, optional): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            xn (np.ndarray | None): 1D array containing the time-domain audio signal corresponding to `X_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
@@ -189,14 +187,14 @@ class NPGate:
         return sig_mask
 
     def __call__(
-            self, x: np.ndarray, xn: Optional[np.ndarray] = None
+            self, x: np.ndarray, xn: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Apply noise reduction to the input signal.
 
         Arguments:
             x (np.ndarray): The input audio signal, with shape (channels, signal_length).
-            xn (Optional[np.ndarray]): The noise signal used for stationary noise reduction. If `None`, the input
+            xn (np.ndarray | None): The noise signal used for stationary noise reduction. If `None`, the input
                                          signal is used as the noise signal. Default: `None`.
 
         Returns:

@@ -1,6 +1,6 @@
 import torch
 from torch.nn.functional import conv1d, conv2d
-from typing import Union, Optional
+
 from .utils import linspace, temperature_sigmoid, amp_to_db
 
 
@@ -20,8 +20,8 @@ class TorchGate(torch.nn.Module):
         n_movemean_nonstationary (int): Window size for moving average in non-stationary masking (default: 20).
         prop_decrease (float): Proportion to decrease signal where the mask is zero (default: 1.0).
         n_fft (int): FFT size for short-time Fourier transform (STFT) (default: 1024).
-        win_length (Optional[int]): Window length for STFT (default: None).
-        hop_length (Optional[int]): Hop length for STFT (default: None).
+        win_length (int | None): Window length for STFT (default: None).
+        hop_length (int | None): Hop length for STFT (default: None).
         freq_mask_smooth_hz (float): Frequency smoothing width for the mask in Hz (default: 500).
         time_mask_smooth_ms (float): Time smoothing width for the mask in ms (default: 50).
     """
@@ -37,8 +37,8 @@ class TorchGate(torch.nn.Module):
         n_movemean_nonstationary: int = 20,
         prop_decrease: float = 1.0,
         n_fft: int = 1024,
-        win_length: Optional[int] = None,
-        hop_length: Optional[int] = None,
+        win_length: int | None = None,
+        hop_length: int | None = None,
         freq_mask_smooth_hz: float = 500,
         time_mask_smooth_ms: float = 50,
     ):
@@ -69,7 +69,7 @@ class TorchGate(torch.nn.Module):
         self.register_buffer("smoothing_filter", self._generate_mask_smoothing_filter())
 
     @torch.no_grad()
-    def _generate_mask_smoothing_filter(self) -> Union[torch.Tensor, None]:
+    def _generate_mask_smoothing_filter(self) -> torch.Tensor | None:
         """
         Generates a smoothing filter for the mask.
 
@@ -122,7 +122,7 @@ class TorchGate(torch.nn.Module):
 
     @torch.no_grad()
     def _stationary_mask(
-        self, X_db: torch.Tensor, xn: Optional[torch.Tensor] = None
+        self, X_db: torch.Tensor, xn: torch.Tensor | None = None
     ) -> torch.Tensor:
         """
         Computes a stationary binary mask.
@@ -132,7 +132,7 @@ class TorchGate(torch.nn.Module):
 
         Arguments:
             X_db (torch.Tensor): 2D array of shape (frames, freq_bins) representing the log-amplitude spectrogram of the signal.
-            xn (torch.Tensor, optional): 1D array containing the time-domain audio signal corresponding to `X_db`.
+            xn (torch.Tensor | None): 1D array containing the time-domain audio signal corresponding to `X_db`.
                                        If provided, this is used to compute the spectrogram for noise estimation.
 
         Returns:
@@ -203,14 +203,14 @@ class TorchGate(torch.nn.Module):
 
     @torch.no_grad()
     def forward(
-        self, x: torch.Tensor, xn: Optional[torch.Tensor] = None
+        self, x: torch.Tensor, xn: torch.Tensor | None = None
     ) -> torch.Tensor:
         """
         Apply noise reduction to the input signal.
 
         Arguments:
             x (torch.Tensor): The input audio signal, with shape (channels, signal_length).
-            xn (Optional[torch.Tensor]): The noise signal used for stationary noise reduction. If `None`, the input
+            xn (torch.Tensor | None): The noise signal used for stationary noise reduction. If `None`, the input
                                          signal is used as the noise signal. Default: `None`.
 
         Returns:
