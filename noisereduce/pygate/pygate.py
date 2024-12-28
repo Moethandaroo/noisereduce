@@ -4,9 +4,9 @@ from scipy.signal import fftconvolve, stft, istft
 from .utils import temperature_sigmoid, amp_to_db, std_mean
 
 
-class NPGate:
+class PyGate:
     """
-    A class that implements the noisereduce algorithm using NumPy.
+    A class that implements the noisereduce algorithm using NumPy and SciPy.
 
     This method performs noise reduction by computing the short-time Fourier transform (STFT) of the input signal
     and applying a signal mask based on either stationary or non-stationary assumptions.

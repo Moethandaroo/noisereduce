@@ -1,8 +1,8 @@
 """
 Contents
 --------
-torchgate imports all the functions from TensorFlow, and in addition provides:
- TorchGating       --- A PyTorch module that applies a spectral gate to an input signal
+tfgate imports all the functions from TensorFlow, and in addition provides:
+ TFGate       --- A TensorFlow noisereduce module
 
 """
 from .tfgate import TFGate
